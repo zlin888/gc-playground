@@ -7,35 +7,34 @@
 #define ALIGN(x) x + x % 8
 
 header_t *FREE_LIST;
-header_t *FREE_LIST_TAIL;
 header_t *HEAP_HEAD;
-header_t *HEAP_TAIL;
+unsigned long ACCUM_SIZE;
 
 header_t *more_space(unsigned long size) {
-  // if (size < MIN_ALLOC_SIZE)
-  //   size = MIN_ALLOC_SIZE;
-  // else if (size % 8 != 0) {
-  //   size = size + size % 8;
-  // }
+  size = ALIGN(size);
   void *vp;
   if ((vp = sbrk(size)) == (void *)-1) {
     printf("FAIL sbrk\n");
     return NULL;
   }
+  ACCUM_SIZE += size;
   return vp;
 }
 
 void gc_init() {
+  ACCUM_SIZE = 0;
   HEAP_HEAD = more_space(sizeof(header_t)); // dummy
-  HEAP_TAIL = HEAP_HEAD;
   FREE_LIST = more_space(sizeof(header_t)); // dummy
-  FREE_LIST_TAIL = FREE_LIST;
+}
+
+void gc_clean() {
+  sbrk(-ACCUM_SIZE);
 }
 
 void add_heap(header_t *hp) {
-  HEAP_TAIL->next = hp;
-  HEAP_TAIL = HEAP_TAIL->next;
-  hp->next = NULL;
+  header_t *tmp = HEAP_HEAD->next;
+  HEAP_HEAD->next = hp;
+  hp->next = tmp;
 }
 
 header_t *create_header_and_add_to_heap() {
@@ -49,7 +48,6 @@ header_t *find_header_from_free_list(unsigned long size) {
   header_t* pre = FREE_LIST;
   for(header_t* cur = FREE_LIST->next; cur != NULL;cur = cur->next) {
     if (size == cur->size) {
-      cur->mark_flag = IN_USED;
       pre->next = cur->next;
       return cur; 
     }
@@ -63,11 +61,13 @@ void *gc_alloc(unsigned long size) {
 
   header_t *free_hp = find_header_from_free_list(size);
   if (free_hp != NULL) {
+    free_hp->mark_flag = IN_USED;
     add_heap(free_hp);
-    printf("find from free list: %lu %lu\n", free_hp, free_hp->payload);
-    return free_hp;
+    printf("find from free list: %lu\n", free_hp->payload);
+    return free_hp->payload;
   } else {
     header_t *hp = create_header_and_add_to_heap();
+    hp->mark_flag = IN_USED;
     hp->size = size;
     hp->payload = more_space(size);
     printf("alloc: %lu %lu\n", hp, hp->payload);
@@ -95,6 +95,13 @@ unsigned long get_stack_bottom() {
          &stack_bottom);
   fclose(statfp);
   return stack_bottom;
+}
+
+void print_stack() {
+  unsigned long st_bot = get_stack_bottom();
+  for (unsigned long st_cur = get_stack_top(); st_cur < st_bot; st_cur = st_cur + 8) {
+    printf("%lu\n", *((unsigned long *)st_cur));
+  }
 }
 
 header_t *is_in_heap(unsigned long p) {
@@ -146,9 +153,9 @@ void print_free_list() {
 
 
 void add_to_free_list(header_t* hp) {
-  FREE_LIST_TAIL->next = hp;
-  hp->next = NULL;
-  FREE_LIST_TAIL = hp;
+  header_t *tmp = FREE_LIST->next;
+  FREE_LIST->next = hp;
+  hp->next = tmp;
 }
 
 void gc_mark() {
@@ -161,12 +168,13 @@ void gc_mark() {
 }
 
 void gc_sweep() {
+  printf("SWEEP BEGIN:\n");
   print_free_list();
   print_heap();
+  printf("\n");
   header_t *pre = HEAP_HEAD;
   for (header_t *cur = HEAP_HEAD->next; cur != NULL;) {
     if (cur->mark_flag == NOT_USED) {
-      printf("sweep: %d %lu\n", cur->size, (unsigned long) cur->payload);
       pre->next = cur->next;
       add_to_free_list(cur); // has side effect on cur
       cur = pre->next;
@@ -175,7 +183,9 @@ void gc_sweep() {
       cur = cur->next;
     }
   }
+  printf("SWEEP END:\n");
   print_free_list();
   print_heap();
+  printf("\n");
 }
 
