@@ -35,6 +35,7 @@ void gc_init() {
 void add_heap(header_t *hp) {
   HEAP_TAIL->next = hp;
   HEAP_TAIL = HEAP_TAIL->next;
+  hp->next = NULL;
 }
 
 header_t *create_header_and_add_to_heap() {
@@ -44,16 +45,34 @@ header_t *create_header_and_add_to_heap() {
   return hp;
 }
 
+header_t *find_header_from_free_list(unsigned long size) {
+  header_t* pre = FREE_LIST;
+  for(header_t* cur = FREE_LIST->next; cur != NULL;cur = cur->next) {
+    if (size == cur->size) {
+      cur->mark_flag = IN_USED;
+      pre->next = cur->next;
+      return cur; 
+    }
+    pre = cur;
+  }
+  return NULL;
+}
+
 void *gc_alloc(unsigned long size) {
   size = ALIGN(size); // align to word size
 
-  header_t *hp = create_header_and_add_to_heap();
-  hp->size = size;
-  // TODO: should search from free list first
-  hp->payload = more_space(size);
-
-  printf("alloc int: %lu %lu\n", hp, hp->payload);
-  return (hp->payload);
+  header_t *free_hp = find_header_from_free_list(size);
+  if (free_hp != NULL) {
+    add_heap(free_hp);
+    printf("find from free list: %lu %lu\n", free_hp, free_hp->payload);
+    return free_hp;
+  } else {
+    header_t *hp = create_header_and_add_to_heap();
+    hp->size = size;
+    hp->payload = more_space(size);
+    printf("alloc: %lu %lu\n", hp, hp->payload);
+    return (hp->payload);
+  }
 }
 
 unsigned long get_stack_top() {
